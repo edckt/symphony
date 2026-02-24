@@ -1,0 +1,19 @@
+# Maven
+/target/
+*.log
+
+# IntelliJ
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.local
+application-test.yaml
+
+# Testcontainers
+**/docker-compose.override.yml

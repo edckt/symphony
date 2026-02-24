@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: symphony-uat
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+namePrefix: uat-
+
+images:
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/symphony
+    newTag: uat-latest
+
+patches:
+  - path: patch-deployment.yaml
+  - path: patch-configmap.yaml
+  - path: patch-secret.yaml
+  - path: patch-cloudsql-proxy.yaml

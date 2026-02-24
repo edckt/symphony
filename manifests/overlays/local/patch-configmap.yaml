@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: symphony-config
+data:
+  SPRING_PROFILES_ACTIVE: dev
+  APP_SECURITY_ENABLED: "false"
+  APP_AUTHZ_MODE: allow-all

@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: wb-postgres-test
+    environment:
+      POSTGRES_DB: workbench
+      POSTGRES_USER: workbench
+      POSTGRES_PASSWORD: workbench
+    ports:
+      - "5432:5432"
+    volumes:
+      - wb_pgdata:/var/lib/postgresql/data
+
+  app:
+    image: symphony:test
+    container_name: wb-app
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/workbench
+      SPRING_DATASOURCE_USERNAME: workbench
+      SPRING_DATASOURCE_PASSWORD: workbench
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      SERVER_PORT: "8080"
+      APP_SECURITY_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_URL: /openapi.yaml
+      SPRINGDOC_SWAGGER_UI_DISABLE_SWAGGER_DEFAULT_URL: "true"
+    ports:
+      - "8080:8080"
+
+volumes:
+  wb_pgdata:

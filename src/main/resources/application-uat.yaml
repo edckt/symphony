@@ -1,0 +1,22 @@
+app:
+  security:
+    enabled: true
+  authz:
+    mode: config
+    managed-groups-by-principal: {}
+    users-by-group: {}
+  cai:
+    enabled: true
+    user-id-claim: ${CAI_USER_ID_CLAIM:preferred_username}
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized

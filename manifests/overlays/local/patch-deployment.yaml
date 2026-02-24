@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: symphony
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: symphony
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/secrets/google/key.json
+          volumeMounts:
+            - name: gcp-sa-key
+              mountPath: /var/secrets/google
+              readOnly: true
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          args:
+            - --structured-logs
+            - --port=5432
+            - --credentials-file=/var/secrets/google/key.json
+            - team-485203:REGION:INSTANCE_NAME
+          securityContext:
+            runAsNonRoot: true
+          volumeMounts:
+            - name: gcp-sa-key
+              mountPath: /var/secrets/google
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+      volumes:
+        - name: gcp-sa-key
+          secret:
+            secretName: gcp-sa-key

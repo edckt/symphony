@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+app:
+  security:
+    enabled: false
+  authz:
+    mode: allow-all
+    managed-groups-by-principal: {}
+    users-by-group: {}
+  cai:
+    enabled: false
+    user-id-claim:   # null = use JWT subject; set to e.g. preferred_username in prod/uat
+  workbench:
+    enabled: false   # set true in prod/uat via env var APP_WORKBENCH_ENABLED
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/workbench}
+    username: ${SPRING_DATASOURCE_USERNAME:workbench}
+    password: ${SPRING_DATASOURCE_PASSWORD:workbench}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+management:
+  endpoint:
+    health:
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    url: /openapi.yaml
+    disable-swagger-default-url: true

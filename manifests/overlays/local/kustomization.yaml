@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: symphony-local
+
+resources:
+  - ../../base
+
+namePrefix: local-
+
+images:
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/symphony
+    newName: symphony
+    newTag: test
+
+patches:
+  - path: patch-deployment.yaml
+  - path: patch-configmap.yaml
+  - path: patch-secret.yaml

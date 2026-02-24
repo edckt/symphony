@@ -1,0 +1,16 @@
+target
+.git
+.gitignore
+.idea
+*.iml
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only config
+.env
+.env.*
+src/main/resources/application-local.yml
+src/main/resources/application-local.yaml

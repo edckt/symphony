@@ -1,0 +1,7 @@
+app:
+  security:
+    enabled: false
+  authz:
+    mode: allow-all
+    managed-groups-by-principal: {}
+    users-by-group: {}

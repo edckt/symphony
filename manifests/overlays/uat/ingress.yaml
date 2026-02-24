@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: symphony
+  annotations:
+    kubernetes.io/ingress.class: gce
+spec:
+  rules:
+    - host: symphony-uat.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: uat-symphony
+                port:
+                  number: 80
