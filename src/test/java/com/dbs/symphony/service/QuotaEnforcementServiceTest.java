@@ -119,10 +119,9 @@ class QuotaEnforcementServiceTest {
                 limits(2, 16, List.of("n2-standard-8"), 200, List.of("us-central1-a")),
                 totals(1, 8)
         );
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto(
-                "my-nb", "us-central1-a", "n2-standard-8", 100, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "n2-standard-8", "us-central1-a", 100, false))
+                .doesNotThrowAnyException();
     }
 
     // -------------------------------------------------------------------------
@@ -132,9 +131,8 @@ class QuotaEnforcementServiceTest {
     @Test
     void enforceCreate_atSystemCap_throwsSystemMaxInstancesExceeded() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(3, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", null, null);
 
-        assertViolationCodes(usage, request, "SYSTEM_MAX_INSTANCES_EXCEEDED");
+        assertViolationCodes(usage, "e2-standard-4", "us-central1-a", 150, false, "SYSTEM_MAX_INSTANCES_EXCEEDED");
     }
 
     // -------------------------------------------------------------------------
@@ -144,9 +142,8 @@ class QuotaEnforcementServiceTest {
     @Test
     void enforceCreate_atManagerInstanceLimit_throwsMaxInstancesExceeded() {
         UserQuotaUsageDto usage = usageSnapshot(limits(2, Integer.MAX_VALUE, List.of(), null, List.of()), totals(2, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", null, null);
 
-        assertViolationCodes(usage, request, "MAX_INSTANCES_EXCEEDED");
+        assertViolationCodes(usage, "e2-standard-4", "us-central1-a", 150, false, "MAX_INSTANCES_EXCEEDED");
     }
 
     // -------------------------------------------------------------------------
@@ -157,38 +154,60 @@ class QuotaEnforcementServiceTest {
     void enforceCreate_vcpuWouldExceedLimit_throwsMaxVcpuExceeded() {
         // current = 12, requesting n2-standard-8 (8 vCPUs), limit = 16 → 12+8=20 > 16
         UserQuotaUsageDto usage = usageSnapshot(limits(3, 16, List.of(), null, List.of()), totals(1, 12));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "n2-standard-8", null, null);
 
-        assertViolationCodes(usage, request, "MAX_VCPU_EXCEEDED");
+        assertViolationCodes(usage, "n2-standard-8", "us-central1-a", 200, false, "MAX_VCPU_EXCEEDED");
     }
 
     @Test
     void enforceCreate_unlimitedVcpu_doesNotCheckVcpu() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "n2-standard-96", null, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "n2-standard-96", "us-central1-a", 200, false))
+                .doesNotThrowAnyException();
     }
 
     // -------------------------------------------------------------------------
-    // enforceCreate — machine type allowlist
+    // enforceCreate — machine type allowlist (requiresApproval=false, i.e. SMALL/MEDIUM)
     // -------------------------------------------------------------------------
 
     @Test
-    void enforceCreate_machineTypeNotAllowed_throwsMachineTypeNotAllowed() {
+    void enforceCreate_defaultSize_machineTypeExplicitlyExcluded_throwsMachineTypeNotAllowed() {
+        // Non-empty allowlist that excludes this machine type → blocked
         UserQuotaUsageDto usage = usageSnapshot(
                 limits(3, Integer.MAX_VALUE, List.of("e2-standard-4"), null, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "n2-standard-8", null, null);
 
-        assertViolationCodes(usage, request, "MACHINE_TYPE_NOT_ALLOWED");
+        assertViolationCodes(usage, "n2-standard-8", "us-central1-a", 200, false, "MACHINE_TYPE_NOT_ALLOWED");
     }
 
     @Test
-    void enforceCreate_emptyMachineTypeAllowlist_allowsAnyMachineType() {
+    void enforceCreate_defaultSize_emptyAllowlist_allowsAnyMachineType() {
+        // Empty allowlist → no restriction for default sizes
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "n2-standard-96", null, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "n2-standard-96", "us-central1-a", 200, false))
+                .doesNotThrowAnyException();
+    }
+
+    // -------------------------------------------------------------------------
+    // enforceCreate — machine type allowlist (requiresApproval=true, i.e. LARGE/XLARGE)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void enforceCreate_approvalSize_emptyAllowlist_throwsMachineTypeNotAllowed() {
+        // requiresApproval=true + empty allowlist → no explicit grant → blocked
+        UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(0, 0));
+
+        assertViolationCodes(usage, "e2-standard-16", "us-central1-a", 300, true, "MACHINE_TYPE_NOT_ALLOWED");
+    }
+
+    @Test
+    void enforceCreate_approvalSize_explicitlyGranted_doesNotThrow() {
+        // requiresApproval=true + machine type in allowlist → allowed
+        UserQuotaUsageDto usage = usageSnapshot(
+                limits(3, Integer.MAX_VALUE, List.of("e2-standard-16"), null, List.of()), totals(0, 0));
+
+        assertThatCode(() -> enforcement.enforceCreate(usage, "e2-standard-16", "us-central1-a", 300, true))
+                .doesNotThrowAnyException();
     }
 
     // -------------------------------------------------------------------------
@@ -199,17 +218,16 @@ class QuotaEnforcementServiceTest {
     void enforceCreate_zoneNotAllowed_throwsZoneNotAllowed() {
         UserQuotaUsageDto usage = usageSnapshot(
                 limits(3, Integer.MAX_VALUE, List.of(), null, List.of("us-central1-a")), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "europe-west1-b", "e2-standard-4", null, null);
 
-        assertViolationCodes(usage, request, "ZONE_NOT_ALLOWED");
+        assertViolationCodes(usage, "e2-standard-4", "europe-west1-b", 150, false, "ZONE_NOT_ALLOWED");
     }
 
     @Test
     void enforceCreate_emptyZoneAllowlist_allowsAnyZone() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "europe-west1-b", "e2-standard-4", null, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "e2-standard-4", "europe-west1-b", 150, false))
+                .doesNotThrowAnyException();
     }
 
     // -------------------------------------------------------------------------
@@ -219,33 +237,24 @@ class QuotaEnforcementServiceTest {
     @Test
     void enforceCreate_diskExceedsLimit_throwsDiskTooLarge() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), 200, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", 300, null);
 
-        assertViolationCodes(usage, request, "DISK_TOO_LARGE");
+        assertViolationCodes(usage, "e2-standard-4", "us-central1-a", 300, false, "DISK_TOO_LARGE");
     }
 
     @Test
     void enforceCreate_diskAtLimit_doesNotThrow() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), 200, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", 200, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
-    }
-
-    @Test
-    void enforceCreate_nullBootDiskGbInRequest_skipsBootDiskCheck() {
-        UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), 200, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", null, null);
-
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "e2-standard-4", "us-central1-a", 200, false))
+                .doesNotThrowAnyException();
     }
 
     @Test
     void enforceCreate_nullBootDiskGbLimit_skipsBootDiskCheck() {
         UserQuotaUsageDto usage = usageSnapshot(limits(3, Integer.MAX_VALUE, List.of(), null, List.of()), totals(0, 0));
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto("nb", "us-central1-a", "e2-standard-4", 500, null);
 
-        assertThatCode(() -> enforcement.enforceCreate(usage, request)).doesNotThrowAnyException();
+        assertThatCode(() -> enforcement.enforceCreate(usage, "e2-standard-4", "us-central1-a", 500, false))
+                .doesNotThrowAnyException();
     }
 
     // -------------------------------------------------------------------------
@@ -259,18 +268,18 @@ class QuotaEnforcementServiceTest {
                 limits(3, Integer.MAX_VALUE, List.of("e2-standard-4"), null, List.of("us-central1-a")),
                 totals(0, 0)
         );
-        CreateInstanceRequestDto request = new CreateInstanceRequestDto(
-                "nb", "europe-west1-b", "n2-standard-8", null, null);
 
-        assertViolationCodes(usage, request, "MACHINE_TYPE_NOT_ALLOWED", "ZONE_NOT_ALLOWED");
+        assertViolationCodes(usage, "n2-standard-8", "europe-west1-b", 200, false,
+                "MACHINE_TYPE_NOT_ALLOWED", "ZONE_NOT_ALLOWED");
     }
 
     // -------------------------------------------------------------------------
     // helpers
     // -------------------------------------------------------------------------
 
-    private void assertViolationCodes(UserQuotaUsageDto usage, CreateInstanceRequestDto request, String... codes) {
-        assertThatThrownBy(() -> enforcement.enforceCreate(usage, request))
+    private void assertViolationCodes(UserQuotaUsageDto usage, String machineType, String zone,
+                                      int bootDiskGb, boolean requiresApproval, String... codes) {
+        assertThatThrownBy(() -> enforcement.enforceCreate(usage, machineType, zone, bootDiskGb, requiresApproval))
                 .isInstanceOf(QuotaViolationException.class)
                 .satisfies(ex -> {
                     var violations = ((QuotaViolationException) ex).getViolations();
@@ -300,7 +309,7 @@ class QuotaEnforcementServiceTest {
     }
 
     private WorkbenchInstanceDto instance(String id, String machineType) {
-        return new WorkbenchInstanceDto(id, id, "RUNNING", machineType, "us-central1-a", "bank1", OffsetDateTime.now());
+        return new WorkbenchInstanceDto(id, id, "ACTIVE", machineType, "us-central1-a", "bank1", OffsetDateTime.now());
     }
 
     private UserQuotaLookupResultDto globalDefaultLookup(String projectId, String groupId, String userId) {

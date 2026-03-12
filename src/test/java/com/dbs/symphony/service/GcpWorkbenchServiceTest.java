@@ -1,6 +1,8 @@
 package com.dbs.symphony.service;
 
 import com.dbs.symphony.dto.AsyncOperationDto;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import com.dbs.symphony.dto.CreateInstanceRequestDto;
 import com.google.api.gax.longrunning.OperationFuture;
 import com.google.cloud.notebooks.v2.CreateInstanceRequest;
@@ -52,7 +54,7 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("projects/p1/locations/us-central1-a/operations/op-1");
 
-        service.createInstance("my-project", "user1", request("asia-southeast1-b"));
+        service.createInstance("my-project", "user1", request("asia-southeast1-b"), "e2-standard-2", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         assertThat(captor.getValue().getParent()).isEqualTo("projects/my-project/locations/asia-southeast1-b");
@@ -63,7 +65,7 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        service.createInstance("p1", "bankUser", request("zone-a"));
+        service.createInstance("p1", "bankUser", request("zone-a"), "e2-standard-2", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         var labels = captor.getValue().getInstance().getLabelsMap();
@@ -76,7 +78,7 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        service.createInstance("p1", "user@example.com", request("zone-a"));
+        service.createInstance("p1", "user@example.com", request("zone-a"), "e2-standard-2", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         assertThat(captor.getValue().getInstance().getLabelsMap())
@@ -88,9 +90,8 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        var requestWithLabels = new CreateInstanceRequestDto(
-                "my-nb", "zone-a", "e2-standard-2", 100, Map.of("team", "data-eng"));
-        service.createInstance("p1", "user1", requestWithLabels);
+        var requestWithLabels = new CreateInstanceRequestDto("my-nb", "zone-a", "SMALL", Map.of("team", "data-eng"));
+        service.createInstance("p1", "user1", requestWithLabels, "e2-standard-4", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         var labels = captor.getValue().getInstance().getLabelsMap();
@@ -105,9 +106,8 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        var requestWithConflict = new CreateInstanceRequestDto(
-                "my-nb", "zone-a", "e2-standard-2", 100, Map.of("user", "attacker"));
-        service.createInstance("p1", "legit-user", requestWithConflict);
+        var requestWithConflict = new CreateInstanceRequestDto("my-nb", "zone-a", "SMALL", Map.of("user", "attacker"));
+        service.createInstance("p1", "legit-user", requestWithConflict, "e2-standard-4", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         assertThat(captor.getValue().getInstance().getLabelsMap())
@@ -119,8 +119,7 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        var req = new CreateInstanceRequestDto("my-nb", "zone-a", "e2-standard-2", 200, null);
-        service.createInstance("p1", "user1", req);
+        service.createInstance("p1", "user1", request("zone-a"), "e2-standard-2", 200);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         assertThat(captor.getValue().getInstance().getGceSetup().getBootDisk().getDiskSizeGb())
@@ -128,16 +127,16 @@ class GcpWorkbenchServiceTest {
     }
 
     @Test
-    void createInstance_defaultBootDiskWhenNull() throws Exception {
+    void createInstance_enforcesMinimumBootDisk150Gb() throws Exception {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        var req = new CreateInstanceRequestDto("my-nb", "zone-a", "e2-standard-2", null, null);
-        service.createInstance("p1", "user1", req);
+        // passing 50 — service must clamp to 150
+        service.createInstance("p1", "user1", request("zone-a"), "e2-standard-2", 50);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         assertThat(captor.getValue().getInstance().getGceSetup().getBootDisk().getDiskSizeGb())
-                .isEqualTo(150L);  // minimum enforced by GCP org policy
+                .isEqualTo(150L);
     }
 
     @Test
@@ -145,7 +144,7 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        service.createInstance("my-project", "user1", request("zone-a"));
+        service.createInstance("my-project", "user1", request("zone-a"), "e2-standard-2", 150);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         var gceSetup = captor.getValue().getInstance().getGceSetup();
@@ -158,9 +157,11 @@ class GcpWorkbenchServiceTest {
     void createInstance_returnsLroNameAsId() throws Exception {
         stubFuture("projects/p1/locations/zone-a/operations/op-99");
 
-        AsyncOperationDto dto = service.createInstance("p1", "user1", request("zone-a"));
+        AsyncOperationDto dto = service.createInstance("p1", "user1", request("zone-a"), "e2-standard-2", 150);
 
-        assertThat(dto.id()).isEqualTo("projects/p1/locations/zone-a/operations/op-99");
+        String expectedId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("projects/p1/locations/zone-a/operations/op-99".getBytes(StandardCharsets.UTF_8));
+        assertThat(dto.id()).isEqualTo(expectedId);
         assertThat(dto.status()).isEqualTo("PENDING");
         assertThat(dto.createdAt()).isNotNull();
     }
@@ -170,8 +171,8 @@ class GcpWorkbenchServiceTest {
         ArgumentCaptor<CreateInstanceRequest> captor = ArgumentCaptor.forClass(CreateInstanceRequest.class);
         stubFuture("op-name");
 
-        var req = new CreateInstanceRequestDto("My Notebook 2024", "zone-a", "e2-standard-2", 100, null);
-        service.createInstance("p1", "user1", req);
+        var req = new CreateInstanceRequestDto("My Notebook 2024", "zone-a", "MEDIUM", null);
+        service.createInstance("p1", "user1", req, "e2-standard-8", 200);
 
         verify(notebookServiceClient).createInstanceAsync(captor.capture());
         String instanceId = captor.getValue().getInstanceId();
@@ -232,7 +233,9 @@ class GcpWorkbenchServiceTest {
         AsyncOperationDto dto = service.deleteInstance(
                 "projects/p1/locations/asia-southeast1-b/instances/my-nb-abc123");
 
-        assertThat(dto.id()).isEqualTo("projects/p1/locations/asia-southeast1-b/operations/op-del-99");
+        String expectedId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("projects/p1/locations/asia-southeast1-b/operations/op-del-99".getBytes(StandardCharsets.UTF_8));
+        assertThat(dto.id()).isEqualTo(expectedId);
         assertThat(dto.status()).isEqualTo("PENDING");
         assertThat(dto.createdAt()).isNotNull();
     }
@@ -260,7 +263,9 @@ class GcpWorkbenchServiceTest {
         AsyncOperationDto dto = service.startInstance(
                 "projects/p1/locations/asia-southeast1-b/instances/my-nb-abc123");
 
-        assertThat(dto.id()).isEqualTo("projects/p1/locations/asia-southeast1-b/operations/op-start-99");
+        String expectedId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("projects/p1/locations/asia-southeast1-b/operations/op-start-99".getBytes(StandardCharsets.UTF_8));
+        assertThat(dto.id()).isEqualTo(expectedId);
         assertThat(dto.status()).isEqualTo("PENDING");
         assertThat(dto.createdAt()).isNotNull();
     }
@@ -288,7 +293,9 @@ class GcpWorkbenchServiceTest {
         AsyncOperationDto dto = service.stopInstance(
                 "projects/p1/locations/asia-southeast1-b/instances/my-nb-abc123");
 
-        assertThat(dto.id()).isEqualTo("projects/p1/locations/asia-southeast1-b/operations/op-stop-99");
+        String expectedId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("projects/p1/locations/asia-southeast1-b/operations/op-stop-99".getBytes(StandardCharsets.UTF_8));
+        assertThat(dto.id()).isEqualTo(expectedId);
         assertThat(dto.status()).isEqualTo("PENDING");
         assertThat(dto.createdAt()).isNotNull();
     }
@@ -348,6 +355,6 @@ class GcpWorkbenchServiceTest {
     }
 
     private CreateInstanceRequestDto request(String zone) {
-        return new CreateInstanceRequestDto("my-notebook", zone, "e2-standard-2", 100, null);
+        return new CreateInstanceRequestDto("my-notebook", zone, "SMALL", null);
     }
 }

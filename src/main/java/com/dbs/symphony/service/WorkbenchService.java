@@ -6,9 +6,11 @@ import com.dbs.symphony.dto.CreateInstanceRequestDto;
 public interface WorkbenchService {
     /**
      * Creates a Workbench instance for the given user in the project.
+     * machineType and bootDiskGb are pre-resolved from the chosen instance size.
      * Returns immediately with a PENDING operation; caller polls getOperation() to check completion.
      */
-    AsyncOperationDto createInstance(String projectId, String bankUserId, CreateInstanceRequestDto request);
+    AsyncOperationDto createInstance(String projectId, String bankUserId, CreateInstanceRequestDto request,
+                                     String machineType, int bootDiskGb);
 
     /**
      * Deletes the Workbench instance identified by its full GCP resource name.

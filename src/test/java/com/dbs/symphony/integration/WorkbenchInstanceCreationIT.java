@@ -23,6 +23,7 @@ import java.util.UUID;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -56,7 +57,7 @@ class WorkbenchInstanceCreationIT extends PostgresIntegrationTestBase {
         when(caiService.listUserInstances(anyString(), anyString())).thenReturn(List.of());
         var pending = new AsyncOperationDto(UUID.randomUUID().toString(), "PENDING",
                 OffsetDateTime.now(), null, null, null);
-        when(workbenchService.createInstance(anyString(), anyString(), any())).thenReturn(pending);
+        when(workbenchService.createInstance(anyString(), anyString(), any(), anyString(), anyInt())).thenReturn(pending);
         when(workbenchService.getOperation(anyString())).thenAnswer(inv ->
                 new AsyncOperationDto(inv.getArgument(0), "DONE", null, OffsetDateTime.now(), null, null));
     }
@@ -73,7 +74,7 @@ class WorkbenchInstanceCreationIT extends PostgresIntegrationTestBase {
 
         setQuota(projectId, groupId, userId, 1);
 
-        var req = new CreateInstanceRequestDto("My Notebook", "asia-southeast1-b", "e2-standard-2", 100, null);
+        var req = new CreateInstanceRequestDto("My Notebook", "asia-southeast1-b", "SMALL", null);
         mvc.perform(post("/v1/projects/{p}/workbench/instances?groupId={g}", projectId, groupId)
                         .with(userJwt(userId))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -96,13 +97,66 @@ class WorkbenchInstanceCreationIT extends PostgresIntegrationTestBase {
 
         setQuota(projectId, groupId, userId, 0);
 
-        var req = new CreateInstanceRequestDto("My Notebook", "asia-southeast1-b", "e2-standard-2", 100, null);
+        var req = new CreateInstanceRequestDto("My Notebook", "asia-southeast1-b", "SMALL", null);
         mvc.perform(post("/v1/projects/{p}/workbench/instances?groupId={g}", projectId, groupId)
                         .with(userJwt(userId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mapper.writeValueAsString(req)))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error", is("QUOTA_VIOLATION")));
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Sizes discovery
+    // ──────────────────────────────────────────────────────
+
+    @Test
+    void listInstanceSizes_noQuotaRestriction_defaultSizesAvailableApprovalSizesBlocked() throws Exception {
+        // No quota set → global default → empty allowedMachineTypes
+        // SMALL/MEDIUM (requiresApproval=false): available by default
+        // LARGE/XLARGE (requiresApproval=true): blocked until manager explicitly grants them
+        mvc.perform(get("/v1/projects/{p}/workbench/instance-sizes?groupId={g}", "p-sizes-1", "g-sizes-1")
+                        .with(userJwt("u-sizes-1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(4)))
+                .andExpect(jsonPath("$[0].size", is("SMALL")))
+                .andExpect(jsonPath("$[0].available", is(true)))
+                .andExpect(jsonPath("$[0].requiresApproval", is(false)))
+                .andExpect(jsonPath("$[1].size", is("MEDIUM")))
+                .andExpect(jsonPath("$[1].available", is(true)))
+                .andExpect(jsonPath("$[1].requiresApproval", is(false)))
+                .andExpect(jsonPath("$[2].size", is("LARGE")))
+                .andExpect(jsonPath("$[2].available", is(false)))
+                .andExpect(jsonPath("$[2].requiresApproval", is(true)))
+                .andExpect(jsonPath("$[3].size", is("XLARGE")))
+                .andExpect(jsonPath("$[3].available", is(false)))
+                .andExpect(jsonPath("$[3].requiresApproval", is(true)));
+    }
+
+    @Test
+    void listInstanceSizes_managerGrantsLargeMachineType_largeBecomesAvailable() throws Exception {
+        String projectId = "p-sizes-2";
+        String groupId   = "g-sizes-2";
+        String userId    = "u-sizes-2";
+
+        // Manager grants LARGE's machine type only
+        setQuotaWithMachineTypes(projectId, groupId, userId, List.of("e2-standard-16"));
+
+        mvc.perform(get("/v1/projects/{p}/workbench/instance-sizes?groupId={g}", projectId, groupId)
+                        .with(userJwt(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(4)))
+                // SMALL/MEDIUM: allowlist is non-empty and excludes their types → unavailable
+                .andExpect(jsonPath("$[0].size", is("SMALL")))
+                .andExpect(jsonPath("$[0].available", is(false)))
+                .andExpect(jsonPath("$[1].size", is("MEDIUM")))
+                .andExpect(jsonPath("$[1].available", is(false)))
+                // LARGE: explicitly granted
+                .andExpect(jsonPath("$[2].size", is("LARGE")))
+                .andExpect(jsonPath("$[2].available", is(true)))
+                // XLARGE: not in allowlist → still blocked
+                .andExpect(jsonPath("$[3].size", is("XLARGE")))
+                .andExpect(jsonPath("$[3].available", is(false)));
     }
 
     // ──────────────────────────────────────────────────────
@@ -172,6 +226,16 @@ class WorkbenchInstanceCreationIT extends PostgresIntegrationTestBase {
 
     private void setQuota(String projectId, String groupId, String userId, int maxInstances) throws Exception {
         var spec = new UserQuotaSpecDto(maxInstances, 0, List.of(), null, List.of());
+        mvc.perform(put("/v1/projects/{p}/managed-groups/{g}/quotas/users/{u}", projectId, groupId, userId)
+                        .with(managerJwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(spec)))
+                .andExpect(status().isOk());
+    }
+
+    private void setQuotaWithMachineTypes(String projectId, String groupId, String userId,
+                                          List<String> allowedMachineTypes) throws Exception {
+        var spec = new UserQuotaSpecDto(3, 0, allowedMachineTypes, null, List.of());
         mvc.perform(put("/v1/projects/{p}/managed-groups/{g}/quotas/users/{u}", projectId, groupId, userId)
                         .with(managerJwt())
                         .contentType(MediaType.APPLICATION_JSON)

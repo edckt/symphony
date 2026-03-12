@@ -116,6 +116,34 @@ paths:
         - bearerAuth: [workbench.manager]
 
   # -------------------------
+  # Workbench Instance Sizing
+  # -------------------------
+  /v1/projects/{projectId}/workbench/instance-sizes:
+    get:
+      tags: [Workbench]
+      summary: List available instance sizes for the caller in the given group context
+      description: |
+        Returns all configured t-shirt sizes with an `available` flag indicating whether the
+        caller's effective quota (allowedMachineTypes) permits each size.
+        The UI should grey out unavailable sizes rather than hide them.
+      operationId: listInstanceSizes
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/groupId"
+      responses:
+        "200":
+          description: Available instance sizes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InstanceSize" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      security:
+        - bearerAuth: [workbench.user]
+
+  # -------------------------
   # Workbench Instance Lifecycle (User)
   # -------------------------
   /v1/projects/{projectId}/workbench/instances:
@@ -1065,15 +1093,53 @@ components:
     # -------------------------
     # Workbench instance models
     # -------------------------
+    InstanceSize:
+      type: object
+      required: [size, displayName, description, machineType, vcpu, memoryGb, bootDiskGb, available, requiresApproval]
+      properties:
+        size:
+          type: string
+          description: Canonical size key (e.g. "SMALL", "MEDIUM", "LARGE", "XLARGE")
+        displayName:
+          type: string
+          description: Human-readable label shown in UI (e.g. "Small")
+        description:
+          type: string
+          description: Short spec summary shown in UI (e.g. "4 vCPU · 16 GB RAM")
+        machineType:
+          type: string
+          description: Underlying GCP machine type (e.g. "e2-standard-4")
+        vcpu:
+          type: integer
+          minimum: 1
+        memoryGb:
+          type: integer
+          minimum: 1
+        bootDiskGb:
+          type: integer
+          minimum: 150
+        available:
+          type: boolean
+          description: false when the caller's effective quota excludes this size
+        requiresApproval:
+          type: boolean
+          description: |
+            true for sizes (LARGE, XLARGE) that are only available when a manager
+            explicitly grants them via allowedMachineTypes. false sizes (SMALL, MEDIUM)
+            are available by default unless explicitly blocked.
+
     CreateInstanceRequest:
       type: object
-      required: [displayName, zone, machineType]
+      required: [displayName, zone, instanceSize]
       additionalProperties: false
       properties:
         displayName: { type: string }
         zone: { type: string }
-        machineType: { type: string }
-        bootDiskGb: { type: integer, minimum: 50 }
+        instanceSize:
+          type: string
+          description: |
+            T-shirt size key (e.g. "SMALL", "MEDIUM", "LARGE", "XLARGE").
+            Call GET /instance-sizes to discover available options for this user.
         labels:
           type: object
           additionalProperties: { type: string }

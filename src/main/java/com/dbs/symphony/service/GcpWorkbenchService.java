@@ -18,6 +18,7 @@ import com.google.longrunning.Operation;
 import com.google.protobuf.Empty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.dbs.symphony.util.OperationIdCodec;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -47,7 +48,8 @@ public class GcpWorkbenchService implements WorkbenchService {
     }
 
     @Override
-    public AsyncOperationDto createInstance(String projectId, String bankUserId, CreateInstanceRequestDto request) {
+    public AsyncOperationDto createInstance(String projectId, String bankUserId, CreateInstanceRequestDto request,
+                                            String machineType, int bootDiskGb) {
         String instanceId = deriveInstanceId(request.displayName());
         String normalizedUserId = GcpLabels.normalizeUserId(bankUserId);
         String parent = "projects/" + projectId + "/locations/" + request.zone();
@@ -59,9 +61,9 @@ public class GcpWorkbenchService implements WorkbenchService {
         labels.put("notebooks-product", "true");
         labels.put("user", normalizedUserId);
 
-        long bootDiskGb = Math.max(150L, request.bootDiskGb() != null ? (long) request.bootDiskGb() : 150L);
+        long effectiveBootDiskGb = Math.max(150L, (long) bootDiskGb);
         BootDisk bootDisk = BootDisk.newBuilder()
-                .setDiskSizeGb(bootDiskGb)
+                .setDiskSizeGb(effectiveBootDiskGb)
                 .build();
 
         NetworkInterface networkInterface = NetworkInterface.newBuilder()
@@ -69,7 +71,7 @@ public class GcpWorkbenchService implements WorkbenchService {
                 .build();
 
         GceSetup gceSetup = GceSetup.newBuilder()
-                .setMachineType(request.machineType())
+                .setMachineType(machineType)
                 .setBootDisk(bootDisk)
                 .addNetworkInterfaces(networkInterface)
                 .setDisablePublicIp(true)
@@ -161,7 +163,7 @@ public class GcpWorkbenchService implements WorkbenchService {
             status = "RUNNING";
         }
 
-        return new AsyncOperationDto(operationName, status, null, doneAt, resourceId, error);
+        return new AsyncOperationDto(OperationIdCodec.encode(operationName), status, null, doneAt, resourceId, error);
     }
 
     private AsyncOperationDto awaitOperationName(OperationFuture<?, OperationMetadata> future, String action) {
@@ -175,7 +177,7 @@ public class GcpWorkbenchService implements WorkbenchService {
             throw new RuntimeException("Failed to start Workbench instance " + action + ": " + e.getCause().getMessage(), e);
         }
         log.info("Workbench instance {} started: operation={}", action, operationName);
-        return new AsyncOperationDto(operationName, "PENDING", OffsetDateTime.now(), null, null, null);
+        return new AsyncOperationDto(OperationIdCodec.encode(operationName), "PENDING", OffsetDateTime.now(), null, null, null);
     }
 
     /** Derives a valid GCP resource ID from a display name. */

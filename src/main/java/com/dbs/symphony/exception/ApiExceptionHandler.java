@@ -40,6 +40,12 @@ public class ApiExceptionHandler {
                 .body(error(e.getMessage(), "NOT_FOUND"));
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ErrorDto> handleConflict(ConflictException e) {
+        return ResponseEntity.status(409)
+                .body(error(e.getMessage(), "CONFLICT"));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorDto> handleValidation(MethodArgumentNotValidException e) {
         String message = e.getBindingResult().getFieldErrors().stream()

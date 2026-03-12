@@ -1,6 +1,13 @@
 package com.dbs.symphony.service;
 
-import com.dbs.symphony.dto.*;
+import com.dbs.symphony.dto.EffectiveLimitsDto;
+import com.dbs.symphony.dto.SystemCapsDto;
+import com.dbs.symphony.dto.UsageTotalsDto;
+import com.dbs.symphony.dto.UserQuotaLookupResultDto;
+import com.dbs.symphony.dto.UserQuotaSpecDto;
+import com.dbs.symphony.dto.UserQuotaUsageDto;
+import com.dbs.symphony.dto.ViolationDto;
+import com.dbs.symphony.dto.WorkbenchInstanceDto;
 import com.dbs.symphony.exception.QuotaViolationException;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +46,8 @@ public class QuotaEnforcementService {
         var lookup = quotaService.getUserQuota(projectId, groupId, userId);
         EffectiveLimitsDto limits = resolveEffectiveLimits(lookup);
 
+        // Count all instances CAI returns: both RUNNING and STOPPED (temporarily off, can restart).
+        // Truly deleted instances disappear from CAI entirely and are never returned here.
         List<WorkbenchInstanceDto> instances = caiService.listUserInstances(projectId, bankUserId);
         int instanceCount = instances.size();
         int totalVcpu = instances.stream()
@@ -66,9 +75,13 @@ public class QuotaEnforcementService {
 
     /**
      * Validates a create request against the pre-computed usage snapshot.
+     * machineType, zone, bootDiskGb, and requiresApproval are pre-resolved from the chosen instance size.
      * Throws QuotaViolationException (→ 422) if any limit would be exceeded.
+     *
+     * @param requiresApproval true for sizes (LARGE/XLARGE) that require explicit manager grant
      */
-    public void enforceCreate(UserQuotaUsageDto usageSnapshot, CreateInstanceRequestDto request) {
+    public void enforceCreate(UserQuotaUsageDto usageSnapshot, String machineType, String zone,
+                              int bootDiskGb, boolean requiresApproval) {
         EffectiveLimitsDto limits = usageSnapshot.effectiveLimits();
         UsageTotalsDto usage = usageSnapshot.usage();
         List<ViolationDto> violations = new ArrayList<>();
@@ -86,7 +99,7 @@ public class QuotaEnforcementService {
 
         // vCPU check
         if (limits.maxTotalVcpu() != UNLIMITED_VCPU) {
-            int requestedVcpu = machineTypeService.vcpuCount(request.machineType());
+            int requestedVcpu = machineTypeService.vcpuCount(machineType);
             if (usage.totalVcpu() + requestedVcpu > limits.maxTotalVcpu()) {
                 violations.add(violation("MAX_VCPU_EXCEEDED",
                         "vCPU limit of " + limits.maxTotalVcpu() + " would be exceeded",
@@ -97,29 +110,31 @@ public class QuotaEnforcementService {
         }
 
         // Machine type allowlist
-        if (!limits.allowedMachineTypes().isEmpty()
-                && !limits.allowedMachineTypes().contains(request.machineType())) {
+        // requiresApproval=true: must be explicitly listed (empty allowlist = not approved)
+        // requiresApproval=false: allowed unless explicitly excluded by a non-empty allowlist
+        boolean machineTypeNotAllowed = requiresApproval
+                ? !limits.allowedMachineTypes().contains(machineType)
+                : !limits.allowedMachineTypes().isEmpty() && !limits.allowedMachineTypes().contains(machineType);
+        if (machineTypeNotAllowed) {
             violations.add(violation("MACHINE_TYPE_NOT_ALLOWED",
-                    "Machine type " + request.machineType() + " is not in the allowed list",
-                    Map.of("value", request.machineType())));
+                    "Machine type " + machineType + " is not in the allowed list",
+                    Map.of("value", machineType)));
         }
 
         // Zone allowlist
         if (!limits.allowedZones().isEmpty()
-                && !limits.allowedZones().contains(request.zone())) {
+                && !limits.allowedZones().contains(zone)) {
             violations.add(violation("ZONE_NOT_ALLOWED",
-                    "Zone " + request.zone() + " is not in the allowed list",
-                    Map.of("value", request.zone())));
+                    "Zone " + zone + " is not in the allowed list",
+                    Map.of("value", zone)));
         }
 
         // Boot disk size
-        if (limits.maxBootDiskGb() != null
-                && request.bootDiskGb() != null
-                && request.bootDiskGb() > limits.maxBootDiskGb()) {
+        if (limits.maxBootDiskGb() != null && bootDiskGb > limits.maxBootDiskGb()) {
             violations.add(violation("DISK_TOO_LARGE",
-                    "Boot disk size " + request.bootDiskGb() + " GB exceeds limit of " + limits.maxBootDiskGb() + " GB",
+                    "Boot disk size " + bootDiskGb + " GB exceeds limit of " + limits.maxBootDiskGb() + " GB",
                     Map.of("limit", limits.maxBootDiskGb(),
-                           "requested", request.bootDiskGb())));
+                           "requested", bootDiskGb)));
         }
 
         if (!violations.isEmpty()) {
@@ -129,8 +144,7 @@ public class QuotaEnforcementService {
 
     // ---------------------------------------------------------------------------
 
-    private EffectiveLimitsDto resolveEffectiveLimits(
-            com.dbs.symphony.dto.UserQuotaLookupResultDto lookup) {
+    private EffectiveLimitsDto resolveEffectiveLimits(UserQuotaLookupResultDto lookup) {
         UserQuotaSpecDto spec = lookup.effectiveSpec();
         if (spec == null) {
             return new EffectiveLimitsDto(

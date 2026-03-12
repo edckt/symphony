@@ -4,15 +4,59 @@ server:
 app:
   security:
     enabled: false
+  instance-sizes:
+    sizes:
+      - size: SMALL
+        display-name: Small
+        description: "4 vCPU · 16 GB RAM"
+        machine-type: e2-standard-4
+        vcpu: 4
+        memory-gb: 16
+        boot-disk-gb: 150
+      - size: MEDIUM
+        display-name: Medium
+        description: "8 vCPU · 32 GB RAM"
+        machine-type: e2-standard-8
+        vcpu: 8
+        memory-gb: 32
+        boot-disk-gb: 200
+      - size: LARGE
+        display-name: Large
+        description: "16 vCPU · 64 GB RAM"
+        machine-type: e2-standard-16
+        vcpu: 16
+        memory-gb: 64
+        boot-disk-gb: 300
+        requires-approval: true
+      - size: XLARGE
+        display-name: X-Large
+        description: "32 vCPU · 128 GB RAM"
+        machine-type: e2-standard-32
+        vcpu: 32
+        memory-gb: 128
+        boot-disk-gb: 500
+        requires-approval: true
   authz:
     mode: allow-all
     managed-groups-by-principal: {}
     users-by-group: {}
   cai:
-    enabled: false
     user-id-claim:   # null = use JWT subject; set to e.g. preferred_username in prod/uat
   workbench:
     enabled: false   # set true in prod/uat via env var APP_WORKBENCH_ENABLED
+    zones: []        # e.g. [asia-southeast1-a, asia-southeast1-b] — set per environment
+  ldap:
+    enabled: false
+    url: ""
+    base: ""
+    bind-dn: ""
+    bind-password: ""
+    group-search-base: ""
+    user-search-base: ""
+    group-object-class: group
+    user-id-attribute: sAMAccountName
+    manager-group-suffix: _Managers
+    user-group-suffix: _Users
 
 spring:
   datasource:
